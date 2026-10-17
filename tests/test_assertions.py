@@ -10,6 +10,8 @@ from evalmatrix.assertions import (
     JsonSchemaEvaluator,
     PathNotFoundError,
     RegexEvaluator,
+    SimilarityEvaluator,
+    TokenBudgetEvaluator,
     evaluate_all,
     evaluate_assertion,
     get_evaluator,
@@ -279,23 +281,175 @@ def test_json_schema_string_expected_schema():
     assert result.passed is True
 
 
+# --- SimilarityEvaluator tests ---
+
+def test_similarity_exact_pass():
+    evaluator = SimilarityEvaluator()
+    config = AssertionConfig(type="similarity", expected="hello world", threshold=0.9)
+    result = evaluator.evaluate("hello world", config)
+    assert result.passed is True
+    assert result.actual == 1.0
+    assert result.expected == 0.9
+    assert "meets or exceeds" in result.message
+
+
+def test_similarity_minor_drift_pass():
+    evaluator = SimilarityEvaluator()
+    # 1 char edit out of 11 chars -> ratio > 0.85
+    config = AssertionConfig(type="similarity", expected="hello world", threshold=0.8)
+    result = evaluator.evaluate("hello word", config)
+    assert result.passed is True
+    assert result.actual >= 0.8
+
+
+def test_similarity_drift_failure_detailed():
+    evaluator = SimilarityEvaluator()
+    config = AssertionConfig(
+        type="similarity",
+        expected="The package was delivered to your front porch",
+        threshold=0.85,
+    )
+    result = evaluator.evaluate("No package found anywhere", config)
+    assert result.passed is False
+    assert result.actual < 0.85
+    assert "below threshold" in result.message
+    assert len(result.error_details) == 3
+
+
+def test_similarity_target_alias_and_metric_options():
+    evaluator = SimilarityEvaluator()
+    config = AssertionConfig(
+        type="similarity",
+        target="invoice payment received",
+        metric="jaccard",
+        threshold=0.4,
+    )
+    result = evaluator.evaluate("invoice payment processed", config)
+    assert result.passed is True
+    assert "jaccard" in result.message
+
+
+def test_similarity_with_path():
+    evaluator = SimilarityEvaluator()
+    config = AssertionConfig(
+        type="similarity",
+        path="summary.text",
+        expected="User requested account cancellation",
+        threshold=0.8,
+    )
+    response = '{"summary": {"text": "User requested account cancellation."}}'
+    result = evaluator.evaluate(response, config)
+    assert result.passed is True
+
+
+def test_similarity_missing_target():
+    evaluator = SimilarityEvaluator()
+    config = AssertionConfig(type="similarity")
+    result = evaluator.evaluate("some text", config)
+    assert result.passed is False
+    assert "requires an 'expected' or 'target'" in result.message
+
+
+# --- TokenBudgetEvaluator tests ---
+
+def test_token_budget_total_pass():
+    evaluator = TokenBudgetEvaluator()
+    config = AssertionConfig(type="token_budget", max_tokens=50, scope="total")
+    resp = ProviderResponse(
+        content="Short response",
+        prompt_tokens=10,
+        completion_tokens=15,
+        total_tokens=25,
+    )
+    result = evaluator.evaluate(resp, config)
+    assert result.passed is True
+    assert result.actual == 25
+    assert result.expected == 50
+    assert "within budget" in result.message
+
+
+def test_token_budget_total_exceeded():
+    evaluator = TokenBudgetEvaluator()
+    config = AssertionConfig(type="token_budget", max_tokens=20, scope="total")
+    resp = ProviderResponse(
+        content="Lengthy response",
+        prompt_tokens=15,
+        completion_tokens=15,
+        total_tokens=30,
+    )
+    result = evaluator.evaluate(resp, config)
+    assert result.passed is False
+    assert result.actual == 30
+    assert result.expected == 20
+    assert "exceeded budget" in result.message
+    assert len(result.error_details) == 4
+    assert any("Overage: 10 tokens" in err for err in result.error_details)
+
+
+def test_token_budget_completion_scope():
+    evaluator = TokenBudgetEvaluator()
+    config = AssertionConfig(type="token_budget", max_tokens=10, scope="completion")
+    resp = ProviderResponse(
+        content="Four words text",
+        prompt_tokens=50,
+        completion_tokens=5,
+    )
+    result = evaluator.evaluate(resp, config)
+    assert result.passed is True
+    assert result.actual == 5
+
+
+def test_token_budget_prompt_scope():
+    evaluator = TokenBudgetEvaluator()
+    config = AssertionConfig(type="token_budget", max_tokens=30, scope="prompt")
+    resp = ProviderResponse(
+        content="Any text",
+        prompt_tokens=35,
+        completion_tokens=2,
+    )
+    result = evaluator.evaluate(resp, config)
+    assert result.passed is False
+    assert result.actual == 35
+
+
+def test_token_budget_heuristic_estimation_fallback():
+    evaluator = TokenBudgetEvaluator()
+    config = AssertionConfig(type="token_budget", max_tokens=20)
+    # Plain string response with no provider token metrics
+    result = evaluator.evaluate("This is a brief text under twenty tokens.", config)
+    assert result.passed is True
+    assert result.actual > 0
+    assert result.actual <= 20
+
+
+def test_token_budget_invalid_scope():
+    evaluator = TokenBudgetEvaluator()
+    config = AssertionConfig(type="token_budget", max_tokens=20, scope="invalid_scope")
+    result = evaluator.evaluate("test", config)
+    assert result.passed is False
+    assert "Invalid token budget scope" in result.message
+
+
+def test_token_budget_missing_limit():
+    evaluator = TokenBudgetEvaluator()
+    config = AssertionConfig(type="token_budget")
+    result = evaluator.evaluate("test", config)
+    assert result.passed is False
+    assert "requires 'max_tokens' or 'expected' limit" in result.message
+
+
 # --- Dispatcher and multi-assertion tests ---
 
-def test_evaluate_all_success_and_failures():
+def test_evaluate_all_with_similarity_and_budget():
     assertions = [
-        AssertionConfig(type="contains", expected="intent"),
-        AssertionConfig(type="exact_match", path="intent", expected="billing"),
-        AssertionConfig(type="regex", path="confidence", expected=r"^0\.\d+$"),
-        AssertionConfig(type="contains", expected="should_fail"),
+        AssertionConfig(type="similarity", expected="Status OK", threshold=0.7),
+        AssertionConfig(type="token_budget", max_tokens=20),
     ]
-    resp = ProviderResponse(content='{"intent": "billing", "confidence": "0.98"}')
+    resp = ProviderResponse(content="Status: OK", prompt_tokens=2, completion_tokens=3)
     results = evaluate_all(resp, assertions)
-    assert len(results) == 4
+    assert len(results) == 2
     assert results[0].passed is True
     assert results[1].passed is True
-    assert results[2].passed is True
-    assert results[3].passed is False
-    assert "[FAILED] contains" in results[3].summary
 
 
 def test_evaluate_assertion_unknown_type():

@@ -170,5 +170,6 @@ class FixtureProvider(BaseProvider):
             metadata={
                 "provider": "fixture",
                 "matched_case_id": case_id,
+                **(metadata or {}),
             },
         )

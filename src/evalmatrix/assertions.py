@@ -1,4 +1,4 @@
-"""Assertion evaluators for exact-match, contains, regex, and JSON schema validation."""
+"""Assertion evaluators for exact-match, contains, regex, schema, similarity, and token budgets."""
 
 import json
 import re
@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Sequence, Type, Union
 from pydantic import BaseModel, Field
 
+from evalmatrix.metrics import compute_similarity, estimate_token_count
 from evalmatrix.models import AssertionConfig, AssertionType, ProviderResponse
 
 try:
@@ -297,7 +298,6 @@ class ExactMatchEvaluator(BaseAssertionEvaluator):
             )
 
         content = get_response_content(response)
-        # If expected is structured, attempt JSON comparison first
         if isinstance(config.expected, (dict, list)):
             try:
                 parsed_content = extract_json_payload(content)
@@ -538,11 +538,205 @@ class JsonSchemaEvaluator(BaseAssertionEvaluator):
         )
 
 
+class SimilarityEvaluator(BaseAssertionEvaluator):
+    """Evaluates text similarity between response output and expected target against a threshold."""
+
+    assertion_type = AssertionType.SIMILARITY.value
+
+    def evaluate(
+        self, response: Union[str, ProviderResponse], config: AssertionConfig
+    ) -> AssertionResult:
+        target = config.expected if config.expected is not None else config.target
+        if target is None:
+            return AssertionResult(
+                passed=False,
+                assertion_type=self.assertion_type,
+                message="Similarity assertion requires an 'expected' or 'target' string value.",
+                path=config.path,
+            )
+
+        if config.path:
+            try:
+                data = extract_json_payload(response)
+            except Exception as err:
+                return AssertionResult(
+                    passed=False,
+                    assertion_type=self.assertion_type,
+                    message=f"Failed to parse JSON response for path '{config.path}': {err}",
+                    expected=target,
+                    path=config.path,
+                )
+            try:
+                actual_val = resolve_path(data, config.path)
+            except PathNotFoundError as err:
+                return AssertionResult(
+                    passed=False,
+                    assertion_type=self.assertion_type,
+                    message=str(err),
+                    expected=target,
+                    path=config.path,
+                )
+            actual_text = str(actual_val)
+        else:
+            actual_text = get_response_content(response)
+
+        metric = config.metric or "levenshtein"
+        threshold = config.threshold if config.threshold is not None else 0.8
+        target_text = str(target)
+
+        try:
+            score = compute_similarity(actual_text, target_text, metric=metric)
+        except ValueError as err:
+            return AssertionResult(
+                passed=False,
+                assertion_type=self.assertion_type,
+                message=str(err),
+                actual=0.0,
+                expected=threshold,
+                path=config.path,
+            )
+
+        score_rounded = round(score, 4)
+        passed = score >= threshold
+
+        if passed:
+            msg = (
+                f"Similarity score {score_rounded:.4f} meets or exceeds threshold {threshold:.4f} "
+                f"(metric: '{metric}')."
+            )
+            err_details: List[str] = []
+        else:
+            target_snippet = (target_text[:60] + "...") if len(target_text) > 60 else target_text
+            actual_snippet = (actual_text[:60] + "...") if len(actual_text) > 60 else actual_text
+            msg = (
+                f"Similarity score {score_rounded:.4f} is below threshold {threshold:.4f} "
+                f"(metric: '{metric}'). Expected target: {target_snippet!r}, got: {actual_snippet!r}"
+            )
+            err_details = [
+                f"Target: {target_text}",
+                f"Actual: {actual_text}",
+                f"Score: {score_rounded} < Threshold: {threshold}",
+            ]
+
+        return AssertionResult(
+            passed=passed,
+            assertion_type=self.assertion_type,
+            message=msg,
+            actual=score_rounded,
+            expected=threshold,
+            path=config.path,
+            error_details=err_details,
+        )
+
+
+class TokenBudgetEvaluator(BaseAssertionEvaluator):
+    """Evaluates whether prompt, completion, or total token usage is within budget bounds."""
+
+    assertion_type = AssertionType.TOKEN_BUDGET.value
+
+    def evaluate(
+        self, response: Union[str, ProviderResponse], config: AssertionConfig
+    ) -> AssertionResult:
+        limit_val = (
+            config.max_tokens
+            if config.max_tokens is not None
+            else (config.expected if config.expected is not None else config.threshold)
+        )
+        if limit_val is None:
+            return AssertionResult(
+                passed=False,
+                assertion_type=self.assertion_type,
+                message="Token budget assertion requires 'max_tokens' or 'expected' limit.",
+                path=config.path,
+            )
+
+        try:
+            limit = int(limit_val)
+        except (ValueError, TypeError):
+            return AssertionResult(
+                passed=False,
+                assertion_type=self.assertion_type,
+                message=f"Invalid token budget limit '{limit_val}': must be an integer.",
+                path=config.path,
+            )
+
+        scope = (config.scope or "total").lower().strip()
+        if scope not in ("total", "completion", "prompt"):
+            return AssertionResult(
+                passed=False,
+                assertion_type=self.assertion_type,
+                message=f"Invalid token budget scope '{scope}'. Must be 'prompt', 'completion', or 'total'.",
+                expected=limit,
+                path=config.path,
+            )
+
+        # Extract or estimate token counts
+        if isinstance(response, ProviderResponse):
+            if scope == "completion":
+                if response.completion_tokens is not None:
+                    actual_tokens = response.completion_tokens
+                else:
+                    actual_tokens = estimate_token_count(response.content)
+            elif scope == "prompt":
+                if response.prompt_tokens is not None:
+                    actual_tokens = response.prompt_tokens
+                else:
+                    p_text = response.metadata.get("prompt") or response.metadata.get("raw_prompt") or ""
+                    actual_tokens = estimate_token_count(p_text)
+            else:  # total
+                if response.total_tokens is not None:
+                    actual_tokens = response.total_tokens
+                else:
+                    c_tok = (
+                        response.completion_tokens
+                        if response.completion_tokens is not None
+                        else estimate_token_count(response.content)
+                    )
+                    p_text = response.metadata.get("prompt") or response.metadata.get("raw_prompt") or ""
+                    p_tok = (
+                        response.prompt_tokens
+                        if response.prompt_tokens is not None
+                        else estimate_token_count(p_text)
+                    )
+                    actual_tokens = c_tok + p_tok
+        else:
+            # Plain string response: estimate text count
+            actual_tokens = estimate_token_count(str(response))
+
+        passed = actual_tokens <= limit
+
+        if passed:
+            msg = f"Token count for scope '{scope}' ({actual_tokens}) is within budget limit ({limit})."
+            err_details: List[str] = []
+        else:
+            msg = f"Token count for scope '{scope}' ({actual_tokens}) exceeded budget limit ({limit})."
+            err_details = [
+                f"Scope: {scope}",
+                f"Actual tokens: {actual_tokens}",
+                f"Budget limit: {limit}",
+                f"Overage: {actual_tokens - limit} tokens",
+            ]
+
+        return AssertionResult(
+            passed=passed,
+            assertion_type=self.assertion_type,
+            message=msg,
+            actual=actual_tokens,
+            expected=limit,
+            path=config.path,
+            error_details=err_details,
+        )
+
+
 EVALUATOR_REGISTRY: Dict[str, Type[BaseAssertionEvaluator]] = {
     AssertionType.EXACT_MATCH.value: ExactMatchEvaluator,
     AssertionType.CONTAINS.value: ContainsEvaluator,
     AssertionType.REGEX.value: RegexEvaluator,
     AssertionType.JSON_SCHEMA.value: JsonSchemaEvaluator,
+    AssertionType.SIMILARITY.value: SimilarityEvaluator,
+    AssertionType.TOKEN_BUDGET.value: TokenBudgetEvaluator,
+    "max_tokens": TokenBudgetEvaluator,
+    "fuzzy": SimilarityEvaluator,
 }
 
 

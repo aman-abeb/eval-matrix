@@ -19,11 +19,15 @@ class AssertionConfig(BaseModel):
     """Specification for an assertion executed against a provider response."""
     type: Union[AssertionType, str] = Field(
         ...,
-        description="Type of assertion to execute (e.g. exact_match, json_schema, contains)",
+        description="Type of assertion to execute (e.g. exact_match, json_schema, contains, similarity, token_budget)",
     )
     expected: Optional[Any] = Field(
         default=None,
         description="Expected value, substring, regex pattern, or JSON schema object",
+    )
+    target: Optional[Any] = Field(
+        default=None,
+        description="Alternative alias for expected target text in similarity assertions",
     )
     path: Optional[str] = Field(
         default=None,
@@ -32,6 +36,18 @@ class AssertionConfig(BaseModel):
     threshold: Optional[float] = Field(
         default=None,
         description="Threshold score for fuzzy or metric comparisons (e.g. 0.0 to 1.0)",
+    )
+    metric: Optional[str] = Field(
+        default=None,
+        description="Similarity metric algorithm (e.g. 'levenshtein', 'jaccard', 'dice', 'ngram_dice')",
+    )
+    scope: Optional[str] = Field(
+        default=None,
+        description="Token budget scope: 'prompt', 'completion', or 'total'",
+    )
+    max_tokens: Optional[int] = Field(
+        default=None,
+        description="Maximum token budget allowance for token_budget assertions",
     )
     description: Optional[str] = Field(
         default=None,

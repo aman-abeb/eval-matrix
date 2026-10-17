@@ -4,17 +4,18 @@
 [![CI](https://github.com/aman-abeb/eval-matrix/actions/workflows/ci.yml/badge.svg)](https://github.com/aman-abeb/eval-matrix/actions/workflows/ci.yml) ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white) ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 <!-- builder:badges:end -->
 
-
 Declarative prompt evaluation and regression testing CLI with offline fixtures, schema assertions, and terminal diffs.
 
 ## Features
 
 - **Declarative YAML Test Suites**: Specify prompts, parameterized templates, test variables, expectations, and assertions in clean, version-controllable YAML files.
 - **Prompt Variable Interpolation Engine**: Parameterize prompts with `{{ var }}` syntax, nested dot-notation (`{{ user.profile.name }}`), list indexing (`{{ items.0 }}`), and fallback filters (`{{ var | default('fallback') }}`).
+- **Fuzzy Text Similarity Assertions**: Detect prompt output drift using normalized Levenshtein ratio, character n-gram Jaccard overlap, and Sørensen–Dice multiset coefficients with customizable thresholds.
+- **Token Budget Bounds Constraints**: Guard against cost regression and verbose drift by validating `prompt`, `completion`, or `total` token consumption limits using provider metrics or heuristic BPE approximation (~4 chars/token).
 - **Zero-Network Offline Fixture Provider**: Execute comprehensive regression test suites deterministically in milliseconds without API keys or remote calls.
 - **Unified Suite Runner Engine**: Orchestrate test cases, render dynamic prompt variables, capture latency, aggregate assertion outcomes, and calculate pass/fail rates.
 - **Strict Typed Schemas**: Built on Pydantic v2 to validate test suites, provider configurations, and response metadata.
-- **Comprehensive Assertion Evaluators**: Deterministic validators for `exact_match`, `contains`, `regex`, and strict `json_schema` with JSON path traversal.
+- **Comprehensive Assertion Evaluators**: Deterministic validators for `exact_match`, `contains`, `regex`, `similarity`, `token_budget`, and strict `json_schema` with JSON path traversal.
 - **Granular Schema Error Paths**: Pinpoint exact field paths (`$.user.email`, `$.items[0].id`) on validation failures.
 - **Extensible Architecture**: Clean provider protocols and assertion registries supporting custom evaluators.
 
@@ -46,7 +47,7 @@ python -m evalmatrix.main --help
 
 ## Example
 
-Define a declarative evaluation suite in YAML (`suite.yaml`) using parameterized prompt templates:
+Define a declarative evaluation suite in YAML (`suite.yaml`) with fuzzy similarity and token budgets:
 
 ```yaml
 name: "customer-support-intent-eval"
@@ -56,7 +57,7 @@ provider:
   type: "fixture"
   fixtures:
     billing_inquiry: '{"intent": "billing", "confidence": 0.98}'
-    refund_request: '{"intent": "refund", "confidence": 0.94}'
+    refund_request: "Please process refund for order #123."
 cases:
   - id: "billing_inquiry"
     name: "Billing question routing"
@@ -72,13 +73,21 @@ cases:
           properties:
             intent: {type: "string", enum: ["billing", "refund"]}
             confidence: {type: "number", minimum: 0.0, maximum: 1.0}
+      - type: "token_budget"
+        max_tokens: 30
+        scope: "completion"
   - id: "refund_request"
     name: "Refund request classification"
     vars:
       query: "I need my money back for order #123."
     assertions:
-      - type: "contains"
-        expected: "refund"
+      - type: "similarity"
+        expected: "Please process refund for order #123."
+        threshold: 0.85
+        metric: "levenshtein"
+      - type: "token_budget"
+        max_tokens: 50
+        scope: "total"
 ```
 
 Execute programmatic loading and evaluation via `run_suite`:
@@ -97,18 +106,19 @@ Sample Output:
 
 ```text
 [PASS] customer-support-intent-eval -> 2/2 cases passed in 3.4ms
-  - billing_inquiry: 2/2 assertions passed (prompt: 'Classify user intent: 'Why was I charged $49 on May 1st?'')
-  - refund_request: 1/1 assertions passed (prompt: 'Classify user intent: 'I need my money back for order #123.'')
+  - billing_inquiry: 3/3 assertions passed (prompt: 'Classify user intent: 'Why was I charged $49 on May 1st?'')
+  - refund_request: 2/2 assertions passed (prompt: 'Classify user intent: 'I need my money back for order #123.'')
 ```
 
 ## How It Works
 
 1. **Suite Loader (`evalmatrix.loader`)**: Reads YAML files and validates test cases, variable inputs, and provider settings into strongly typed `TestSuite` models.
 2. **Template Engine (`evalmatrix.templating`)**: Renders Jinja-style prompt variables (`{{ var }}`), traverses nested objects (`{{ user.profile.name }}`), and evaluates default filters prior to generation.
-3. **Provider Protocol (`evalmatrix.providers.base`)**: Implements an extensible runtime interface (`ProviderProtocol` & `BaseProvider`) that decouples prompt generation from evaluation logic.
-4. **Fixture Provider (`evalmatrix.providers.fixture`)**: Resolves prompt responses offline through case IDs, direct inline responses, or static fixture dictionaries with simulated token metrics and zero network latency.
-5. **Assertion Engine (`evalmatrix.assertions`)**: Validates model output against exact matches, substring containment, regex patterns, or strict JSON schemas with path traversal and granular error path reporting.
-6. **Evaluation Suite Runner (`evalmatrix.runner`)**: Interpolates prompt variables, executes test cases against providers, captures generation latency and execution duration, isolates runtime exceptions, and aggregates summary metrics.
+3. **Metrics & Token Estimator (`evalmatrix.metrics`)**: Computes offline string similarity metrics (Levenshtein ratio, Jaccard index, Sørensen–Dice n-gram overlaps) and performs subword-aware BPE heuristic token count estimation with zero external tokenizer dependencies.
+4. **Provider Protocol (`evalmatrix.providers.base`)**: Implements an extensible runtime interface (`ProviderProtocol` & `BaseProvider`) that decouples prompt generation from evaluation logic.
+5. **Fixture Provider (`evalmatrix.providers.fixture`)**: Resolves prompt responses offline through case IDs, direct inline responses, or static fixture dictionaries with simulated token metrics and zero network latency.
+6. **Assertion Engine (`evalmatrix.assertions`)**: Validates model output against exact matches, substring containment, regex patterns, strict JSON schemas, fuzzy text similarity scores, and token budget ceilings.
+7. **Evaluation Suite Runner (`evalmatrix.runner`)**: Interpolates prompt variables, executes test cases against providers, captures generation latency and execution duration, isolates runtime exceptions, and aggregates summary metrics.
 
 ## Running Tests
 
