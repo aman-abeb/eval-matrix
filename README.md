@@ -157,11 +157,17 @@ pytest tests -v
 <!-- builder:roadmap:start -->
 ## Status
 
-**In active development:** 2 of 3 milestones done.
+**Complete.** EvalMatrix is a declarative prompt evaluation and regression testing CLI featuring offline fixtures, JSON schema validation, fuzzy similarity assertions, and terminal diffs. It exports CI-friendly Markdown reports with deterministic exit codes to catch LLM prompt regressions before production.
 
 ## Roadmap
 
 - [x] **Core Runner, Provider Interface, and Schema Assertions**: Implement the extensible LLM Provider protocol, an offline FixtureProvider, YAML suite parsing, and strict JSON Schema and exact-match validators with full unit test coverage.
 - [x] **Fuzzy Evaluators, Token Budgets, and Prompt Templating**: Add Jinja-style prompt variable interpolation, character n-gram similarity scoring, token budget constraint checks, and fixture recording utilities.
-- [ ] **Rich CLI, CI Markdown Exporter, and Realistic Extraction Demo**: Build the Typer CLI with interactive colored matrix outputs, failure inspection diffs, markdown CI reporting, and a turnkey customer-support extraction evaluation demo.
+- [x] **Rich CLI, CI Markdown Exporter, and Realistic Extraction Demo**: Build the Typer CLI with interactive colored matrix outputs, failure inspection diffs, markdown CI reporting, and a turnkey customer-support extraction evaluation demo.
+
+## Ideas for future work
+
+- Add live API provider integrations (OpenAI, Anthropic, Ollama) alongside the offline FixtureProvider
+- Support parallel async suite execution for massive evaluation datasets
+- Introduce HTML report exports with side-by-side visual diff viewers
 <!-- builder:roadmap:end -->
