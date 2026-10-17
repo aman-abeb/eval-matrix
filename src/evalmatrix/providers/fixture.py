@@ -26,7 +26,7 @@ class FixtureProvider(BaseProvider):
     6. Fallback response (if configured).
     """
 
-    def __init__(
+    def __init__(    
         self,
         fixtures: Optional[Dict[str, Any]] = None,
         fallback: Optional[str] = None,
@@ -86,7 +86,10 @@ class FixtureProvider(BaseProvider):
 
     @staticmethod
     def _load_fixture_file(path: Path) -> Dict[str, Any]:
-        """Load key-value fixtures from a JSON or YAML file."""
+        """Load key-value fixtures from a JSON or YAML file.
+
+        Supports root dictionary mappings or nested dictionaries under 'fixtures' or 'cases'.
+        """
         if not path.is_file():
             raise FileNotFoundError(f"Fixture file not found: {path}")
 
@@ -105,11 +108,45 @@ class FixtureProvider(BaseProvider):
 
         if not isinstance(data, dict):
             raise ValueError(f"Fixture file must contain a key-value mapping, got {type(data).__name__}")
+
+        if "fixtures" in data and isinstance(data["fixtures"], dict):
+            return data["fixtures"]
+        if "cases" in data and isinstance(data["cases"], dict):
+            return data["cases"]
         return data
 
     def set_fixture(self, key: str, response: Union[str, Dict[str, Any]]) -> None:
         """Register or update a fixture entry."""
         self._fixtures[key] = response
+
+    def save_fixtures(
+        self,
+        path: Union[str, Path],
+        merge: bool = False,
+        indent: int = 2,
+    ) -> Path:
+        """Save currently loaded fixtures to a YAML or JSON file."""
+        file_path = Path(path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        is_json = file_path.suffix.lower() == ".json"
+
+        data_to_write = dict(self._fixtures)
+        if merge and file_path.is_file():
+            content = file_path.read_text(encoding="utf-8").strip()
+            existing: Dict[str, Any] = {}
+            if content:
+                try:
+                    existing = json.loads(content) if is_json else (yaml.safe_load(content) or {})
+                except Exception:
+                    existing = {}
+            if isinstance(existing, dict):
+                data_to_write = {**existing, **data_to_write}
+
+        if is_json:
+            file_path.write_text(json.dumps(data_to_write, indent=indent, ensure_ascii=False) + "\n", encoding="utf-8")
+        else:
+            file_path.write_text(yaml.safe_dump(data_to_write, sort_keys=False, allow_unicode=True), encoding="utf-8")
+        return file_path
 
     def generate(
         self,
@@ -148,6 +185,45 @@ class FixtureProvider(BaseProvider):
             raise FixtureNotFoundError(
                 f"No fixture match found for {id_info} or prompt: {snippet!r}. "
                 f"Available fixture keys: {list(self._fixtures.keys())}"
+            )
+
+        # Check if resolved_val is a detailed fixture record dict
+        if isinstance(resolved_val, dict) and (
+            "__evalmatrix_record__" in resolved_val
+            or (
+                isinstance(resolved_val.get("content"), str)
+                and (
+                    "recorded_at" in resolved_val
+                    or ("prompt_tokens" in resolved_val and "latency_ms" in resolved_val)
+                )
+            )
+        ):
+            content_str = resolved_val.get("content", "")
+            raw_val = resolved_val.get("raw")
+            latency_ms = float(resolved_val.get("latency_ms", self.default_latency_ms))
+            prompt_tokens = resolved_val.get("prompt_tokens")
+            if prompt_tokens is None:
+                prompt_tokens = max(1, len(prompt) // 4)
+            completion_tokens = resolved_val.get("completion_tokens")
+            if completion_tokens is None:
+                completion_tokens = max(1, len(content_str) // 4)
+            total_tokens = resolved_val.get("total_tokens")
+            if total_tokens is None:
+                total_tokens = prompt_tokens + completion_tokens
+            meta = dict(resolved_val.get("metadata", {}))
+            return ProviderResponse(
+                content=content_str,
+                raw=raw_val if raw_val is not None else resolved_val,
+                latency_ms=latency_ms,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                metadata={
+                    "provider": "fixture",
+                    "matched_case_id": case_id,
+                    **meta,
+                    **(metadata or {}),
+                },
             )
 
         # Format value into string content

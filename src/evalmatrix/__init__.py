@@ -37,6 +37,12 @@ from evalmatrix.models import (
 )
 from evalmatrix.providers.base import BaseProvider, ProviderProtocol
 from evalmatrix.providers.fixture import FixtureNotFoundError, FixtureProvider
+from evalmatrix.recorder import (
+    FixtureRecorder,
+    RecordedEntry,
+    SuiteRecordResult,
+    record_suite,
+)
 from evalmatrix.runner import CaseResult, SuiteResult, SuiteRunner, run_suite
 from evalmatrix.templating import (
     TemplateRenderError,
@@ -56,13 +62,16 @@ __all__ = [
     "ExactMatchEvaluator",
     "FixtureNotFoundError",
     "FixtureProvider",
+    "FixtureRecorder",
     "JsonSchemaEvaluator",
     "PathNotFoundError",
     "ProviderConfig",
     "ProviderProtocol",
     "ProviderResponse",
+    "RecordedEntry",
     "RegexEvaluator",
     "SimilarityEvaluator",
+    "SuiteRecordResult",
     "SuiteResult",
     "SuiteRunner",
     "TestCase",
@@ -85,6 +94,7 @@ __all__ = [
     "load_suite_from_string",
     "load_suite_from_yaml",
     "ngram_dice_similarity",
+    "record_suite",
     "register_evaluator",
     "render_template",
     "run_suite",
