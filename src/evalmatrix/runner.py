@@ -10,6 +10,7 @@ from evalmatrix.loader import load_suite_from_string, load_suite_from_yaml
 from evalmatrix.models import ProviderResponse, TestCase, TestSuite
 from evalmatrix.providers.base import ProviderProtocol
 from evalmatrix.providers.fixture import FixtureProvider
+from evalmatrix.templating import render_template
 
 
 class CaseResult(BaseModel):
@@ -21,6 +22,8 @@ class CaseResult(BaseModel):
     duration_ms: float = Field(default=0.0, description="Total execution duration in milliseconds")
     latency_ms: float = Field(default=0.0, description="Provider response generation latency in milliseconds")
     prompt: str = Field(..., description="Effective prompt string submitted to provider")
+    rendered_prompt: Optional[str] = Field(default=None, description="Rendered prompt string after template interpolation")
+    raw_prompt: Optional[str] = Field(default=None, description="Original unrendered prompt template")
     response: Optional[ProviderResponse] = Field(default=None, description="Underlying provider response")
     assertions: List[AssertionResult] = Field(default_factory=list, description="Evaluated assertion results")
 
@@ -84,6 +87,7 @@ class SuiteRunner:
         self,
         provider: Optional[ProviderProtocol] = None,
         base_dir: Optional[Union[str, Path]] = None,
+        strict_templates: bool = True,
     ) -> None:
         """Initialize the suite runner.
 
@@ -91,9 +95,11 @@ class SuiteRunner:
             provider: Optional default provider instance. If not provided, constructed
                       from TestSuite.provider configuration.
             base_dir: Optional base directory to resolve relative fixture file paths.
+            strict_templates: Whether missing template variables raise execution errors.
         """
         self.provider = provider
         self.base_dir = Path(base_dir) if base_dir else None
+        self.strict_templates = strict_templates
 
     def _resolve_provider(
         self,
@@ -122,22 +128,56 @@ class SuiteRunner:
             f"Supply an explicit ProviderProtocol implementation to SuiteRunner."
         )
 
-    def run_case(self, case: TestCase, provider: ProviderProtocol) -> CaseResult:
+    def run_case(
+        self,
+        case: TestCase,
+        provider: ProviderProtocol,
+        default_template: Optional[str] = None,
+    ) -> CaseResult:
         """Execute a single test case against the given provider and evaluate assertions.
+
+        Renders template variables prior to calling the provider.
 
         Args:
             case: The TestCase definition.
             provider: The target evaluation provider.
+            default_template: Optional suite-level prompt template if case.prompt is None.
 
         Returns:
             CaseResult with assertion evaluations and latency metrics.
         """
         start_time = time.perf_counter()
-        try:
-            response = provider.generate(
-                prompt=case.prompt,
+        raw_template = case.prompt or default_template
+
+        if not raw_template:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+            return CaseResult(
                 case_id=case.id,
-                metadata=case.metadata,
+                case_name=case.name,
+                passed=False,
+                error=f"ValueError: Case '{case.id}' has no prompt and no suite-level prompt_template is defined.",
+                duration_ms=round(elapsed_ms, 2),
+                latency_ms=0.0,
+                prompt="",
+                rendered_prompt=None,
+                raw_prompt=None,
+                response=None,
+                assertions=[],
+            )
+
+        try:
+            # Interpolate prompt variables
+            vars_map = case.get_variables()
+            rendered_prompt = render_template(
+                raw_template,
+                vars_map,
+                strict=self.strict_templates,
+            )
+
+            response = provider.generate(
+                prompt=rendered_prompt,
+                case_id=case.id,
+                metadata={**(case.metadata or {}), "raw_prompt": raw_template},
             )
             eval_results = evaluate_all(response, case.assertions)
             passed = all(r.passed for r in eval_results)
@@ -150,7 +190,9 @@ class SuiteRunner:
                 error=None,
                 duration_ms=round(elapsed_ms, 2),
                 latency_ms=round(response.latency_ms, 2),
-                prompt=case.prompt,
+                prompt=rendered_prompt,
+                rendered_prompt=rendered_prompt,
+                raw_prompt=raw_template,
                 response=response,
                 assertions=eval_results,
             )
@@ -163,7 +205,9 @@ class SuiteRunner:
                 error=f"{type(exc).__name__}: {str(exc)}",
                 duration_ms=round(elapsed_ms, 2),
                 latency_ms=0.0,
-                prompt=case.prompt,
+                prompt=raw_template,
+                rendered_prompt=None,
+                raw_prompt=raw_template,
                 response=None,
                 assertions=[],
             )
@@ -221,7 +265,11 @@ class SuiteRunner:
 
         case_results: List[CaseResult] = []
         for case in actual_suite.cases:
-            case_res = self.run_case(case, resolved_provider)
+            case_res = self.run_case(
+                case,
+                resolved_provider,
+                default_template=actual_suite.prompt_template,
+            )
             case_results.append(case_res)
 
         total_cases = len(case_results)

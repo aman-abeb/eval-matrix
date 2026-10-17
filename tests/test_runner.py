@@ -86,6 +86,8 @@ def test_suite_runner_all_passing():
     assert case1.error is None
     assert case1.response is not None
     assert case1.latency_ms > 0
+    assert case1.rendered_prompt == "Hello there!"
+    assert case1.raw_prompt == "Hello there!"
 
 
 def test_suite_runner_mixed_failures():
@@ -273,6 +275,153 @@ def test_suite_runner_unsupported_provider_raises():
     runner = SuiteRunner()
     with pytest.raises(ValueError, match="Unsupported provider type 'non_existent_provider_xyz'"):
         runner.run_suite(suite)
+
+
+def test_suite_runner_prompt_template_and_vars():
+    """Verify suite-level prompt_template is parameterized across multiple cases."""
+    suite_yaml = """
+name: "parameterized-template-suite"
+prompt_template: "Translate '{{ phrase }}' into {{ language }}"
+provider:
+  type: "fixture"
+  fixtures:
+    case_fr: "Bonjour"
+    case_es: "Hola"
+cases:
+  - id: "case_fr"
+    vars:
+      phrase: "Hello"
+      language: "French"
+    assertions:
+      - type: "exact_match"
+        expected: "Bonjour"
+  - id: "case_es"
+    vars:
+      phrase: "Hello"
+      language: "Spanish"
+    assertions:
+      - type: "exact_match"
+        expected: "Hola"
+"""
+    result = run_suite(suite_yaml)
+    assert result.passed is True
+    assert result.total_cases == 2
+
+    case_fr = result.get_case_result("case_fr")
+    assert case_fr is not None
+    assert case_fr.prompt == "Translate 'Hello' into French"
+    assert case_fr.rendered_prompt == "Translate 'Hello' into French"
+    assert case_fr.raw_prompt == "Translate '{{ phrase }}' into {{ language }}"
+
+    case_es = result.get_case_result("case_es")
+    assert case_es is not None
+    assert case_es.prompt == "Translate 'Hello' into Spanish"
+    assert case_es.rendered_prompt == "Translate 'Hello' into Spanish"
+
+
+def test_suite_runner_case_prompt_overrides_suite_template():
+    """Verify individual case prompt overrides suite-wide template."""
+    suite_yaml = """
+name: "override-template-suite"
+prompt_template: "Default template: {{ item }}"
+provider:
+  type: "fixture"
+  fixtures:
+    case_default: "Default item: Book"
+    case_custom: "Custom template for Toy"
+cases:
+  - id: "case_default"
+    vars:
+      item: "Book"
+    assertions:
+      - type: "contains"
+        expected: "Book"
+  - id: "case_custom"
+    prompt: "Custom template for {{ item }}"
+    vars:
+      item: "Toy"
+    assertions:
+      - type: "contains"
+        expected: "Toy"
+"""
+    result = run_suite(suite_yaml)
+    assert result.passed is True
+    c_def = result.get_case_result("case_default")
+    c_cust = result.get_case_result("case_custom")
+    assert c_def.prompt == "Default template: Book"
+    assert c_cust.prompt == "Custom template for Toy"
+
+
+def test_suite_runner_nested_variables_interpolation():
+    """Verify nested dot-notation access in test case variables."""
+    suite_yaml = """
+name: "nested-vars-suite"
+provider:
+  type: "fixture"
+  fixtures:
+    c1: "Processed: Alice with role admin"
+cases:
+  - id: "c1"
+    prompt: "User: {{ user.profile.name }} ({{ user.role }})"
+    vars:
+      user:
+        profile:
+          name: "Alice"
+        role: "admin"
+    assertions:
+      - type: "exact_match"
+        expected: "Processed: Alice with role admin"
+"""
+    result = run_suite(suite_yaml)
+    assert result.passed is True
+    c1 = result.get_case_result("c1")
+    assert c1.rendered_prompt == "User: Alice (admin)"
+
+
+def test_suite_runner_missing_template_variable_error():
+    """Verify missing template variable in strict mode records an execution error."""
+    suite_yaml = """
+name: "missing-var-suite"
+provider:
+  type: "fixture"
+  fixtures:
+    c1: "never reached"
+cases:
+  - id: "c1"
+    prompt: "Hello {{ required_var }}"
+    vars: {}
+"""
+    result = run_suite(suite_yaml)
+    assert result.passed is False
+    assert result.errored_cases == 1
+    c1 = result.get_case_result("c1")
+    assert c1.passed is False
+    assert "UndefinedVariableError" in c1.error
+    assert "required_var" in c1.error
+    assert c1.rendered_prompt is None
+
+
+def test_suite_runner_variables_alias_compatibility():
+    """Verify both 'vars' and 'variables' dictionary keys are accepted."""
+    suite_yaml = """
+name: "variables-alias-suite"
+provider:
+  type: "fixture"
+  fixtures:
+    c1: "Resolved"
+cases:
+  - id: "c1"
+    prompt: "Value: {{ key }}"
+    variables:
+      key: "expected_value"
+    assertions:
+      - type: "exact_match"
+        expected: "Resolved"
+"""
+    result = run_suite(suite_yaml)
+    assert result.passed is True
+    c1 = result.get_case_result("c1")
+    assert c1.rendered_prompt == "Value: expected_value"
 
 
 def test_offline_performance_success_criterion():

@@ -97,10 +97,17 @@ class TestCase(BaseModel):
     id: str = Field(..., description="Unique alphanumeric identifier for this test case")
     name: Optional[str] = Field(default=None, description="Descriptive title for test reporting")
     description: Optional[str] = Field(default=None, description="Detailed explanation of scenario")
-    prompt: str = Field(..., description="Prompt text or prompt template")
-    variables: Dict[str, Any] = Field(
+    prompt: Optional[str] = Field(
+        default=None,
+        description="Prompt text or prompt template; optional if suite defines prompt_template",
+    )
+    vars: Dict[str, Any] = Field(
         default_factory=dict,
         description="Template variable substitutions for dynamic prompts",
+    )
+    variables: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Alias for vars parameter dictionary",
     )
     assertions: List[AssertionConfig] = Field(
         default_factory=list,
@@ -115,6 +122,27 @@ class TestCase(BaseModel):
         description="Direct offline response override for this specific test case",
     )
 
+    @model_validator(mode="before")
+    @classmethod
+    def sync_vars(cls, data: Any) -> Any:
+        """Synchronize vars and variables so either can be specified declaratively."""
+        if isinstance(data, dict):
+            raw_vars = data.get("vars")
+            raw_variables = data.get("variables")
+            if raw_vars is not None and raw_variables is None:
+                data["variables"] = dict(raw_vars)
+            elif raw_variables is not None and raw_vars is None:
+                data["vars"] = dict(raw_variables)
+            elif raw_vars is not None and raw_variables is not None:
+                merged = {**raw_variables, **raw_vars}
+                data["vars"] = merged
+                data["variables"] = merged
+        return data
+
+    def get_variables(self) -> Dict[str, Any]:
+        """Return merged dictionary of variables for template interpolation."""
+        return {**self.variables, **self.vars}
+
 
 class TestSuite(BaseModel):
     """Declarative evaluation suite holding test cases and execution configuration."""
@@ -122,12 +150,26 @@ class TestSuite(BaseModel):
 
     name: str = Field(..., description="Identifier or name of the test suite")
     description: Optional[str] = Field(default=None, description="Description of evaluation scope")
+    prompt_template: Optional[str] = Field(
+        default=None,
+        description="Suite-wide default prompt template used when cases do not specify an explicit prompt",
+    )
     provider: ProviderConfig = Field(
         default_factory=lambda: ProviderConfig(type="fixture"),
         description="Provider configuration used for test case execution",
     )
     cases: List[TestCase] = Field(default_factory=list, description="List of test cases in this suite")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Suite metadata and tags")
+
+    @model_validator(mode="after")
+    def validate_case_prompts(self) -> "TestSuite":
+        """Verify that every test case has a prompt or the suite defines a prompt_template."""
+        for case in self.cases:
+            if not case.prompt and not self.prompt_template:
+                raise ValueError(
+                    f"Test case '{case.id}' does not have a 'prompt' and no suite-level 'prompt_template' is defined."
+                )
+        return self
 
     def get_case(self, case_id: str) -> Optional[TestCase]:
         """Lookup a test case by its unique id."""

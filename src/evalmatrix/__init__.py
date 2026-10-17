@@ -25,6 +25,12 @@ from evalmatrix.models import (
 from evalmatrix.providers.base import BaseProvider, ProviderProtocol
 from evalmatrix.providers.fixture import FixtureNotFoundError, FixtureProvider
 from evalmatrix.runner import CaseResult, SuiteResult, SuiteRunner, run_suite
+from evalmatrix.templating import (
+    TemplateRenderError,
+    UndefinedVariableError,
+    extract_template_variables,
+    render_template,
+)
 
 __all__ = [
     "AssertionConfig",
@@ -47,12 +53,16 @@ __all__ = [
     "SuiteRunner",
     "TestCase",
     "TestSuite",
+    "TemplateRenderError",
+    "UndefinedVariableError",
     "evaluate_all",
     "evaluate_assertion",
+    "extract_template_variables",
     "get_evaluator",
     "load_suite_from_string",
     "load_suite_from_yaml",
     "register_evaluator",
+    "render_template",
     "run_suite",
 ]
 __version__ = "0.1.0"

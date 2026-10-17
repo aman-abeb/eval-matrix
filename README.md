@@ -9,9 +9,10 @@ Declarative prompt evaluation and regression testing CLI with offline fixtures, 
 
 ## Features
 
-- **Declarative YAML Test Suites**: Specify prompts, test variables, expectations, and assertions in clean, version-controllable YAML files.
+- **Declarative YAML Test Suites**: Specify prompts, parameterized templates, test variables, expectations, and assertions in clean, version-controllable YAML files.
+- **Prompt Variable Interpolation Engine**: Parameterize prompts with `{{ var }}` syntax, nested dot-notation (`{{ user.profile.name }}`), list indexing (`{{ items.0 }}`), and fallback filters (`{{ var | default('fallback') }}`).
 - **Zero-Network Offline Fixture Provider**: Execute comprehensive regression test suites deterministically in milliseconds without API keys or remote calls.
-- **Unified Suite Runner Engine**: Orchestrate test cases, capture latency, aggregate assertion outcomes, and calculate pass/fail rates.
+- **Unified Suite Runner Engine**: Orchestrate test cases, render dynamic prompt variables, capture latency, aggregate assertion outcomes, and calculate pass/fail rates.
 - **Strict Typed Schemas**: Built on Pydantic v2 to validate test suites, provider configurations, and response metadata.
 - **Comprehensive Assertion Evaluators**: Deterministic validators for `exact_match`, `contains`, `regex`, and strict `json_schema` with JSON path traversal.
 - **Granular Schema Error Paths**: Pinpoint exact field paths (`$.user.email`, `$.items[0].id`) on validation failures.
@@ -45,11 +46,12 @@ python -m evalmatrix.main --help
 
 ## Example
 
-Define a declarative evaluation suite in YAML (`suite.yaml`):
+Define a declarative evaluation suite in YAML (`suite.yaml`) using parameterized prompt templates:
 
 ```yaml
 name: "customer-support-intent-eval"
 description: "Tests intent extraction against customer queries"
+prompt_template: "Classify user intent: '{{ query }}'"
 provider:
   type: "fixture"
   fixtures:
@@ -58,7 +60,8 @@ provider:
 cases:
   - id: "billing_inquiry"
     name: "Billing question routing"
-    prompt: "Classify user intent: Why was I charged $49 on May 1st?"
+    vars:
+      query: "Why was I charged $49 on May 1st?"
     assertions:
       - type: "exact_match"
         expected: '{"intent": "billing", "confidence": 0.98}'
@@ -71,7 +74,8 @@ cases:
             confidence: {type: "number", minimum: 0.0, maximum: 1.0}
   - id: "refund_request"
     name: "Refund request classification"
-    prompt: "Classify user intent: I need my money back for order #123."
+    vars:
+      query: "I need my money back for order #123."
     assertions:
       - type: "contains"
         expected: "refund"
@@ -86,24 +90,25 @@ result = run_suite("suite.yaml")
 status = "PASS" if result.passed else "FAIL"
 print(f"[{status}] {result.suite_name} -> {result.passed_cases}/{result.total_cases} cases passed in {result.duration_ms:.1f}ms")
 for case in result.case_results:
-    print(f"  - {case.case_id}: {case.passed_assertions}/{case.total_assertions} assertions passed")
+    print(f"  - {case.case_id}: {case.passed_assertions}/{case.total_assertions} assertions passed (prompt: '{case.rendered_prompt}')")
 ```
 
 Sample Output:
 
 ```text
 [PASS] customer-support-intent-eval -> 2/2 cases passed in 3.4ms
-  - billing_inquiry: 2/2 assertions passed
-  - refund_request: 1/1 assertions passed
+  - billing_inquiry: 2/2 assertions passed (prompt: 'Classify user intent: 'Why was I charged $49 on May 1st?'')
+  - refund_request: 1/1 assertions passed (prompt: 'Classify user intent: 'I need my money back for order #123.'')
 ```
 
 ## How It Works
 
 1. **Suite Loader (`evalmatrix.loader`)**: Reads YAML files and validates test cases, variable inputs, and provider settings into strongly typed `TestSuite` models.
-2. **Provider Protocol (`evalmatrix.providers.base`)**: Implements an extensible runtime interface (`ProviderProtocol` & `BaseProvider`) that decouples prompt generation from evaluation logic.
-3. **Fixture Provider (`evalmatrix.providers.fixture`)**: Resolves prompt responses offline through case IDs, direct inline responses, or static fixture dictionaries with simulated token metrics and zero network latency.
-4. **Assertion Engine (`evalmatrix.assertions`)**: Validates model output against exact matches, substring containment, regex patterns, or strict JSON schemas with path traversal and granular error path reporting.
-5. **Evaluation Suite Runner (`evalmatrix.runner`)**: Executes test cases against providers, captures generation latency and execution duration, isolates runtime exceptions, and aggregates summary metrics.
+2. **Template Engine (`evalmatrix.templating`)**: Renders Jinja-style prompt variables (`{{ var }}`), traverses nested objects (`{{ user.profile.name }}`), and evaluates default filters prior to generation.
+3. **Provider Protocol (`evalmatrix.providers.base`)**: Implements an extensible runtime interface (`ProviderProtocol` & `BaseProvider`) that decouples prompt generation from evaluation logic.
+4. **Fixture Provider (`evalmatrix.providers.fixture`)**: Resolves prompt responses offline through case IDs, direct inline responses, or static fixture dictionaries with simulated token metrics and zero network latency.
+5. **Assertion Engine (`evalmatrix.assertions`)**: Validates model output against exact matches, substring containment, regex patterns, or strict JSON schemas with path traversal and granular error path reporting.
+6. **Evaluation Suite Runner (`evalmatrix.runner`)**: Interpolates prompt variables, executes test cases against providers, captures generation latency and execution duration, isolates runtime exceptions, and aggregates summary metrics.
 
 ## Running Tests
 

@@ -22,7 +22,8 @@ class FixtureProvider(BaseProvider):
     2. Match by exact `case_id`.
     3. Match by exact `prompt` text.
     4. Match by normalized prompt (stripped whitespace).
-    5. Fallback response (if configured).
+    5. Match by raw unrendered prompt template (from metadata).
+    6. Fallback response (if configured).
     """
 
     def __init__(
@@ -132,11 +133,15 @@ class FixtureProvider(BaseProvider):
         elif prompt.strip() in self._fixtures:
             resolved_val = self._fixtures[prompt.strip()]
 
-        # Step 4: Fallback if configured
+        # Step 4: Check raw prompt template from metadata if present
+        elif metadata and metadata.get("raw_prompt") in self._fixtures:
+            resolved_val = self._fixtures[metadata["raw_prompt"]]
+
+        # Step 5: Fallback if configured
         elif self.fallback is not None:
             resolved_val = self.fallback
 
-        # Step 5: Fail if not found
+        # Step 6: Fail if not found
         else:
             id_info = f"case_id='{case_id}'" if case_id else "no case_id"
             snippet = (prompt[:40] + "...") if len(prompt) > 40 else prompt
