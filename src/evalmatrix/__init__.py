@@ -24,6 +24,7 @@ from evalmatrix.models import (
 )
 from evalmatrix.providers.base import BaseProvider, ProviderProtocol
 from evalmatrix.providers.fixture import FixtureNotFoundError, FixtureProvider
+from evalmatrix.runner import CaseResult, SuiteResult, SuiteRunner, run_suite
 
 __all__ = [
     "AssertionConfig",
@@ -31,6 +32,7 @@ __all__ = [
     "AssertionType",
     "BaseAssertionEvaluator",
     "BaseProvider",
+    "CaseResult",
     "ContainsEvaluator",
     "ExactMatchEvaluator",
     "FixtureNotFoundError",
@@ -41,6 +43,8 @@ __all__ = [
     "ProviderProtocol",
     "ProviderResponse",
     "RegexEvaluator",
+    "SuiteResult",
+    "SuiteRunner",
     "TestCase",
     "TestSuite",
     "evaluate_all",
@@ -49,5 +53,6 @@ __all__ = [
     "load_suite_from_string",
     "load_suite_from_yaml",
     "register_evaluator",
+    "run_suite",
 ]
 __version__ = "0.1.0"

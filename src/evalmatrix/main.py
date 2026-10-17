@@ -8,7 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from evalmatrix.loader import load_suite_from_yaml
-from evalmatrix.providers.fixture import FixtureProvider
+from evalmatrix.runner import SuiteRunner
 
 app = typer.Typer(
     name="evalmatrix",
@@ -42,24 +42,45 @@ def run(
         raise typer.Exit(code=1)
 
     console.print(f"[bold green]Loaded suite:[/bold green] {suite.name} ({len(suite.cases)} cases)")
-    provider = FixtureProvider.from_config(suite.provider, base_dir=suite_path.parent, suite_cases=suite.cases)
+    runner = SuiteRunner(base_dir=suite_path.parent)
+    suite_result = runner.run_suite(suite)
 
     table = Table(title=f"Evaluation: {suite.name}")
     table.add_column("Case ID", style="cyan", no_wrap=True)
     table.add_column("Prompt Snippet", style="white")
-    table.add_column("Response", style="green")
+    table.add_column("Status", justify="center")
+    table.add_column("Assertions", justify="center")
     table.add_column("Latency", style="magenta", justify="right")
 
-    for case in suite.cases:
-        try:
-            resp = provider.generate(prompt=case.prompt, case_id=case.id)
-            snippet = case.prompt[:35] + "..." if len(case.prompt) > 35 else case.prompt
-            resp_snippet = resp.content.replace("\n", " ")[:40] + "..." if len(resp.content) > 40 else resp.content
-            table.add_row(case.id, snippet, resp_snippet, f"{resp.latency_ms:.1f}ms")
-        except Exception as e:
-            table.add_row(case.id, case.prompt[:35], f"[red]ERROR: {e}[/red]", "-")
+    for case_res in suite_result.case_results:
+        if case_res.error:
+            status = "[bold red]ERROR[/bold red]"
+            assert_str = "-"
+        elif case_res.passed:
+            status = "[bold green]PASS[/bold green]"
+            assert_str = f"{case_res.passed_assertions}/{case_res.total_assertions}"
+        else:
+            status = "[bold red]FAIL[/bold red]"
+            assert_str = f"{case_res.passed_assertions}/{case_res.total_assertions}"
+
+        snippet = case_res.prompt[:35] + "..." if len(case_res.prompt) > 35 else case_res.prompt
+        table.add_row(
+            case_res.case_id,
+            snippet,
+            status,
+            assert_str,
+            f"{case_res.latency_ms:.1f}ms",
+        )
 
     console.print(table)
+    status_style = "green" if suite_result.passed else "red"
+    console.print(
+        f"[{status_style}]Summary:[/{status_style}] {suite_result.passed_cases}/{suite_result.total_cases} cases passed "
+        f"({suite_result.passed_assertions}/{suite_result.total_assertions} assertions) in {suite_result.duration_ms:.1f}ms"
+    )
+
+    if not suite_result.passed:
+        raise typer.Exit(code=1)
 
 
 def _run_demo() -> None:
@@ -87,7 +108,8 @@ cases:
         expected: '{"intent": "cancel_subscription", "confidence": 0.95}'
 """
     suite = load_suite_from_string(demo_yaml)
-    provider = FixtureProvider.from_config(suite.provider, suite_cases=suite.cases)
+    runner = SuiteRunner()
+    result = runner.run_suite(suite)
 
     table = Table(title="EvalMatrix Built-in Self-Test Demo")
     table.add_column("Case ID", style="cyan")
@@ -95,12 +117,14 @@ cases:
     table.add_column("Fixture Output", style="green")
     table.add_column("Status", style="bold green")
 
-    for case in suite.cases:
-        resp = provider.generate(prompt=case.prompt, case_id=case.id)
-        table.add_row(case.id, case.prompt, resp.content, "READY")
+    for case_res in result.case_results:
+        content = case_res.response.content if case_res.response else "-"
+        status = "PASS" if case_res.passed else "FAIL"
+        table.add_row(case_res.case_id, case_res.prompt, content, status)
 
     console.print(table)
-    console.print("\n[dim]Run [bold]python main.py --help[/bold] to see CLI usage instructions.[/dim]")
+    console.print(f"\n[bold green]Demo finished successfully in {result.duration_ms:.1f}ms![/bold green]")
+    console.print("[dim]Run [bold]python main.py --help[/bold] to see CLI usage instructions.[/dim]")
 
 
 def main() -> None:

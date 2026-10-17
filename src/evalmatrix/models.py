@@ -92,6 +92,8 @@ class ProviderResponse(BaseModel):
 
 class TestCase(BaseModel):
     """Individual test case specification within an evaluation suite."""
+    __test__ = False
+
     id: str = Field(..., description="Unique alphanumeric identifier for this test case")
     name: Optional[str] = Field(default=None, description="Descriptive title for test reporting")
     description: Optional[str] = Field(default=None, description="Detailed explanation of scenario")
@@ -116,6 +118,8 @@ class TestCase(BaseModel):
 
 class TestSuite(BaseModel):
     """Declarative evaluation suite holding test cases and execution configuration."""
+    __test__ = False
+
     name: str = Field(..., description="Identifier or name of the test suite")
     description: Optional[str] = Field(default=None, description="Description of evaluation scope")
     provider: ProviderConfig = Field(
