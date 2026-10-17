@@ -1,0 +1,235 @@
+name: "customer-support-extraction"
+description: "Realistic 12-case customer support triage and entity extraction evaluation"
+prompt_template: "You are a support classification bot. Extract intent, urgency, sentiment, entities, summary, action, and confidence from this customer query:
+
+Query: '{{ query }}'
+
+Output strict JSON conforming to schema."
+provider:
+  type: "fixture"
+  fixture_file: "support_fixtures.yaml"
+
+cases:
+  - id: "case_01_billing_dispute"
+    name: "Billing Dispute Extraction"
+    vars:
+      query: "Why was my card billed $49.00 on May 1st? I never signed up for annual renewal!"
+    assertions:
+      - type: "json_schema"
+        expected:
+          type: "object"
+          required: ["intent", "urgency", "sentiment", "entities", "summary", "action", "confidence"]
+          properties:
+            intent: {type: "string", enum: ["billing_dispute", "account_cancellation", "auth_issue", "shipping_status", "refund_request", "bug_report", "feature_request", "sales_upgrade", "update_shipping_address", "promotions_inquiry", "warranty_claim", "feedback_compliment"]}
+            urgency: {type: "string", enum: ["low", "medium", "high", "critical"]}
+            sentiment: {type: "string", enum: ["positive", "neutral", "negative"]}
+            entities: {type: "object"}
+            confidence: {type: "number", minimum: 0.0, maximum: 1.0}
+      - type: "exact_match"
+        path: "intent"
+        expected: "billing_dispute"
+      - type: "exact_match"
+        path: "urgency"
+        expected: "high"
+      - type: "similarity"
+        path: "summary"
+        expected: "Customer questions unauthorized $49 subscription charge"
+        threshold: 0.85
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 100
+
+  - id: "case_02_account_cancellation"
+    name: "Account Cancellation Risk"
+    vars:
+      query: "Please close my account immediately and delete my data. Your recent updates broke my workflow."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "account_cancellation"
+      - type: "exact_match"
+        path: "sentiment"
+        expected: "negative"
+      - type: "contains"
+        path: "action"
+        expected: "churn"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 100
+
+  - id: "case_03_password_reset"
+    name: "Auth & Password Reset Link"
+    vars:
+      query: "I can't log in because my password reset link expired. My email is alex@example.com."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "auth_issue"
+      - type: "exact_match"
+        path: "entities.user_email"
+        expected: "alex@example.com"
+      - type: "contains"
+        path: "action"
+        expected: "password_reset"
+      - type: "token_budget"
+        scope: "total"
+        max_tokens: 150
+
+  - id: "case_04_order_status"
+    name: "Order Shipping Status"
+    vars:
+      query: "Can you check when package ORD-98432 will arrive? It was supposed to be delivered yesterday."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "shipping_status"
+      - type: "exact_match"
+        path: "entities.order_id"
+        expected: "ORD-98432"
+      - type: "regex"
+        path: "summary"
+        expected: 'ORD-\d+'
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 80
+
+  - id: "case_05_refund_request"
+    name: "Damaged Product Refund"
+    vars:
+      query: "My Smart Noise Cancelling Headphones arrived with a cracked headband. I need a full refund for order ORD-12890."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "refund_request"
+      - type: "exact_match"
+        path: "urgency"
+        expected: "high"
+      - type: "contains"
+        path: "entities.product"
+        expected: "Headphones"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 90
+
+  - id: "case_06_bug_report"
+    name: "Critical Checkout 500 Outage"
+    vars:
+      query: "Our payment system is completely down! POST /api/v2/checkout returns 500 Internal Server Error for every buyer."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "bug_report"
+      - type: "exact_match"
+        path: "urgency"
+        expected: "critical"
+      - type: "contains"
+        path: "action"
+        expected: "escalate"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 100
+
+  - id: "case_07_feature_request"
+    name: "Mobile Dark Mode Suggestion"
+    vars:
+      query: "Love the app! Any chance you will add a dark mode theme for the iOS and Android versions soon?"
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "feature_request"
+      - type: "exact_match"
+        path: "sentiment"
+        expected: "positive"
+      - type: "contains"
+        path: "entities.requested_feature"
+        expected: "Dark mode"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 80
+
+  - id: "case_08_plan_upgrade"
+    name: "Enterprise 50-Seat Upgrade"
+    vars:
+      query: "We've outgrown our Starter plan and need to upgrade our team of 50 seats to Enterprise with SSO."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "sales_upgrade"
+      - type: "exact_match"
+        path: "entities.target_tier"
+        expected: "Enterprise"
+      - type: "exact_match"
+        path: "action"
+        expected: "assign_account_executive"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 90
+
+  - id: "case_09_address_change"
+    name: "Pre-Dispatch Address Update"
+    vars:
+      query: "I just placed ORD-77123 ten minutes ago, but I selected the wrong delivery address. Please change it to Austin, TX!"
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "update_shipping_address"
+      - type: "exact_match"
+        path: "entities.order_id"
+        expected: "ORD-77123"
+      - type: "contains"
+        path: "entities.new_city"
+        expected: "Austin"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 90
+
+  - id: "case_10_discount_inquiry"
+    name: "Coupon Code Failure"
+    vars:
+      query: "I entered promotional voucher SPRING25 at checkout but received an invalid code error."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "promotions_inquiry"
+      - type: "exact_match"
+        path: "entities.coupon_code"
+        expected: "SPRING25"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 80
+
+  - id: "case_11_hardware_warranty"
+    name: "Hardware Replacement Warranty"
+    vars:
+      query: "Our Thermal Sensor Hub (Serial SN-5542-XL) won't turn on. We bought it 4 months ago under the 1-year warranty."
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "warranty_claim"
+      - type: "exact_match"
+        path: "entities.serial_number"
+        expected: "SN-5542-XL"
+      - type: "contains"
+        path: "action"
+        expected: "replacement"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 90
+
+  - id: "case_12_positive_feedback"
+    name: "Agent Kudos Recognition"
+    vars:
+      query: "Huge thanks to Sarah on your support team! She resolved our billing problem in under 3 minutes. Fantastic service!"
+    assertions:
+      - type: "exact_match"
+        path: "intent"
+        expected: "feedback_compliment"
+      - type: "exact_match"
+        path: "sentiment"
+        expected: "positive"
+      - type: "exact_match"
+        path: "entities.agent_name"
+        expected: "Sarah"
+      - type: "token_budget"
+        scope: "completion"
+        max_tokens: 80

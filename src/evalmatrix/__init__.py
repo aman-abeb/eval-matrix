@@ -15,6 +15,12 @@ from evalmatrix.assertions import (
     get_evaluator,
     register_evaluator,
 )
+from evalmatrix.diff import (
+    format_diff_markdown,
+    generate_unified_diff,
+    render_diff_panel,
+    render_text_diff,
+)
 from evalmatrix.loader import load_suite_from_string, load_suite_from_yaml
 from evalmatrix.metrics import (
     compute_similarity,
@@ -42,6 +48,11 @@ from evalmatrix.recorder import (
     RecordedEntry,
     SuiteRecordResult,
     record_suite,
+)
+from evalmatrix.reporter import (
+    export_markdown_report,
+    generate_markdown_report,
+    render_terminal_matrix,
 )
 from evalmatrix.runner import CaseResult, SuiteResult, SuiteRunner, run_suite
 from evalmatrix.templating import (
@@ -84,7 +95,11 @@ __all__ = [
     "estimate_token_count",
     "evaluate_all",
     "evaluate_assertion",
+    "export_markdown_report",
     "extract_template_variables",
+    "format_diff_markdown",
+    "generate_markdown_report",
+    "generate_unified_diff",
     "get_character_ngrams",
     "get_evaluator",
     "get_word_ngrams",
@@ -96,7 +111,10 @@ __all__ = [
     "ngram_dice_similarity",
     "record_suite",
     "register_evaluator",
+    "render_diff_panel",
     "render_template",
+    "render_terminal_matrix",
+    "render_text_diff",
     "run_suite",
 ]
 __version__ = "0.1.0"

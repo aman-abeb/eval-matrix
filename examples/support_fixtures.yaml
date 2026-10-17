@@ -1,0 +1,126 @@
+case_01_billing_dispute:
+  intent: "billing_dispute"
+  urgency: "high"
+  sentiment: "negative"
+  entities:
+    amount: "$49.00"
+    transaction_date: "May 1st"
+  summary: "Customer questions unauthorized $49 subscription charge"
+  action: "route_to_billing"
+  confidence: 0.98
+
+case_02_account_cancellation:
+  intent: "account_cancellation"
+  urgency: "high"
+  sentiment: "negative"
+  entities:
+    reason: "dissatisfaction with recent updates"
+  summary: "User wants immediate account termination and data removal"
+  action: "churn_intervention_queue"
+  confidence: 0.97
+
+case_03_password_reset:
+  intent: "auth_issue"
+  urgency: "medium"
+  sentiment: "neutral"
+  entities:
+    user_email: "alex@example.com"
+  summary: "Reset link expired and user cannot authenticate"
+  action: "trigger_password_reset_email"
+  confidence: 0.99
+
+case_04_order_status:
+  intent: "shipping_status"
+  urgency: "low"
+  sentiment: "neutral"
+  entities:
+    order_id: "ORD-98432"
+  summary: "Inquiry regarding shipping updates for package ORD-98432"
+  action: "fetch_tracking_info"
+  confidence: 0.96
+
+case_05_refund_request:
+  intent: "refund_request"
+  urgency: "high"
+  sentiment: "negative"
+  entities:
+    order_id: "ORD-12890"
+    product: "Smart Noise Cancelling Headphones"
+  summary: "Customer requesting full refund for damaged defective item"
+  action: "initiate_rma_process"
+  confidence: 0.95
+
+case_06_bug_report:
+  intent: "bug_report"
+  urgency: "critical"
+  sentiment: "negative"
+  entities:
+    status_code: "500 Internal Server Error"
+    endpoint: "/api/v2/checkout"
+  summary: "Checkout endpoint returning HTTP 500 preventing transactions"
+  action: "escalate_to_engineering"
+  confidence: 0.99
+
+case_07_feature_request:
+  intent: "feature_request"
+  urgency: "low"
+  sentiment: "positive"
+  entities:
+    requested_feature: "Dark mode theme support for mobile app"
+  summary: "Requesting dark mode theme option in mobile client"
+  action: "log_product_feedback"
+  confidence: 0.92
+
+case_08_plan_upgrade:
+  intent: "sales_upgrade"
+  urgency: "medium"
+  sentiment: "positive"
+  entities:
+    current_tier: "Starter"
+    target_tier: "Enterprise"
+    team_size: "50 seats"
+  summary: "Prospective enterprise upgrade for 50-person organization"
+  action: "assign_account_executive"
+  confidence: 0.98
+
+case_09_address_change:
+  intent: "update_shipping_address"
+  urgency: "high"
+  sentiment: "neutral"
+  entities:
+    order_id: "ORD-77123"
+    new_city: "Austin, TX"
+  summary: "Address update request before shipment dispatch"
+  action: "modify_order_fulfillment"
+  confidence: 0.94
+
+case_10_discount_inquiry:
+  intent: "promotions_inquiry"
+  urgency: "low"
+  sentiment: "neutral"
+  entities:
+    coupon_code: "SPRING25"
+  summary: "Inquiring why promo code SPRING25 failed to apply at cart"
+  action: "check_coupon_eligibility"
+  confidence: 0.93
+
+case_11_hardware_warranty:
+  intent: "warranty_claim"
+  urgency: "medium"
+  sentiment: "neutral"
+  entities:
+    serial_number: "SN-5542-XL"
+    device: "Thermal Sensor Hub"
+  summary: "Device refuses to power on under standard 12-month warranty"
+  action: "dispatch_replacement_unit"
+  confidence: 0.96
+
+case_12_positive_feedback:
+  intent: "feedback_compliment"
+  urgency: "low"
+  sentiment: "positive"
+  entities:
+    agent_name: "Sarah"
+  summary: "Praising agent Sarah for swift and helpful assistance"
+  action: "record_agent_kudos"
+  confidence: 0.97
